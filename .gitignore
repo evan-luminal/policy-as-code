@@ -1,0 +1,10 @@
+fugue.yaml
+fuguecli.log
+ripley.log
+.DS_Store
+.python-version
+.sublime-project
+*.pyc
+.idea
+__pycache__
+*.pyc

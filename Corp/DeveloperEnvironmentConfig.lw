@@ -1,0 +1,14 @@
+export
+  new
+
+fun new() -> String:
+  Template.render {
+    data: {},
+    template: userData,
+    missBehavior: Template.MissAsEmptyString,
+  }
+
+userData:
+  "#! /usr/bin/env bash
+  \apt-get update
+  \apt-get install -y nginx"

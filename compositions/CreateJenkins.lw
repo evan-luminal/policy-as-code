@@ -1,0 +1,31 @@
+composition
+
+import Corp 
+
+import Config.Environment as Environment
+
+import Fugue.AWS.Pattern.Network as Network
+import Fugue.AWS as AWS
+
+ciNetwork: Network.new {
+  name: "ciNetwork",
+  cidr: Environment.config.cidr,
+  region: AWS.Us-east-1,
+  publicSubnets: [
+    (AWS.A, Environment.config.subnet0),
+    (AWS.B, Environment.config.subnet1),
+  ],
+  privateSubnets: [],
+  enableDnsSupport: True,
+  enableDnsHostnames: True,
+  tags: [
+    AWS.tag("Name", "Jenkins CI Network")
+  ]
+}
+
+jenkins: Corp.Jenkins.new {
+  name: "Jenkins",
+  keyName: Environment.config.keyName,
+  subnets: ciNetwork.publicSubnets,
+  artifactRepoName: Environment.config.artifactRepoName,
+}

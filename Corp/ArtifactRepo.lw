@@ -1,0 +1,18 @@
+export
+  new
+
+import Fugue.AWS.S3 as S3
+import Fugue.AWS as AWS
+
+fun new {
+      name: String, 
+      region: Optional<AWS.Region>, 
+      tags: Optional<List<AWS.Tag>>
+    } -> S3.Bucket:
+  let extraTags: Optional.unpack([],tags)
+  S3.Bucket.new {
+    acl: S3.AuthenticatedRead,
+    name: name,
+    region: Optional.unpack(AWS.Us-east-1, region),
+    tags: List.concat([AWS.tag("Name", name)], extraTags)
+  }

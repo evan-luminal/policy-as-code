@@ -1,0 +1,9 @@
+composition
+
+import Corp
+
+import Config.Environment as Environment
+
+repo: Corp.ArtifactRepo.new {
+  name: Environment.config.artifactRepoName
+}

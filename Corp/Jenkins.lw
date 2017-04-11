@@ -1,0 +1,206 @@
+export
+  type Jenkins
+  new
+
+import Corp.InfoSecStandards as InfoSecStandards
+import Corp.JenkinsConfig as JenkinsConfig
+import Corp.Environment as Environment
+
+import Fugue.AWS.AutoScaling as AutoScaling
+import Fugue.AWS.EC2 as EC2
+import Fugue.AWS.ELB as ELB
+import Fugue.AWS.IAM as IAM
+import Fugue.AWS as AWS
+
+type Jenkins:
+  | Jenkins
+    elb: ELB.LoadBalancer
+    asg: AutoScaling.AutoScalingGroup
+    sgs: JenkinsSecurityGroups
+
+type JenkinsSecurityGroups:
+  elbSg: EC2.SecurityGroup
+  asgSg: EC2.SecurityGroup
+  clientSg: EC2.SecurityGroup
+
+fun amiForRegion(region: AWS.Region) -> String:
+  case region of
+    | AWS.Ap-northeast-1 -> "ami-6fccbe08"
+    | AWS.Ap-southeast-1 -> "ami-50e64d33"
+    | AWS.Ap-southeast-2 -> "ami-799d981a"
+    | AWS.Eu-central-1   -> "ami-78559817"
+    | AWS.Eu-west-1      -> "ami-a192bad2"
+    | AWS.Sa-east-1      -> "ami-ff861c93"
+    | AWS.Us-east-1      -> "ami-49c9295f"
+    | AWS.Us-west-1      -> "ami-3e21725e"
+    | AWS.Us-west-2      -> "ami-5e63d13e"
+    | _                  -> error("Region not supported")
+    # Ubuntu 14.04 (trusty) amd64 hvm:ebs-ssd
+    # From https://cloud-images.ubuntu.com/locator/ec2/
+
+fun makeJenkinsSgs {
+      name: String,
+      vpc: EC2.Vpc,
+      extraTags: List<AWS.Tag>
+    } -> JenkinsSecurityGroups:
+  let elbSg: EC2.SecurityGroup.new {
+    description: name ++ "-elb-sg",
+    ipPermissions: [
+      EC2.IpPermission.http(EC2.IpPermission.Target.all),
+      EC2.IpPermission.https(EC2.IpPermission.Target.all),
+    ],
+    tags: List.concat([AWS.tag("Name", name ++ "-elb-sg")], extraTags),
+    vpc: vpc,
+  }
+  let asgSg: EC2.SecurityGroup.new {
+    description: name ++ "-asg-sg",
+    ipPermissions: makeAsgRules(elbSg, clientSg),
+    tags: List.concat([AWS.tag("Name", name ++ "-asg-sg")], extraTags),
+    vpc: vpc,
+  }
+  let clientSg: EC2.SecurityGroup.new {
+    description: name ++ "-client-sg",
+    ipPermissions: [],
+    tags: List.concat([AWS.tag("Name", name ++ "-client-sg")], extraTags),
+    vpc: vpc,
+  }
+  {
+    elbSg: elbSg,
+    asgSg: asgSg,
+    clientSg: clientSg,
+  }
+
+fun makeAsgRules(elbSg: EC2.SecurityGroup, clientSg: EC2.SecurityGroup) -> List<EC2.IpPermission>:
+  let rules: [
+    EC2.IpPermission.http(EC2.IpPermission.Target.securityGroups([elbSg])),
+    EC2.IpPermission.https(EC2.IpPermission.Target.securityGroups([elbSg])),
+    EC2.IpPermission.tcp(8080,EC2.IpPermission.Target.securityGroups([elbSg])),
+  ]
+  if InfoSecStandards.isApprovedEnvironment() then
+    let sshAccess: [
+      EC2.IpPermission.ssh(EC2.IpPermission.Target.securityGroups([clientSg])),
+      EC2.IpPermission.ssh(EC2.IpPermission.Target.all),
+    ]
+    List.concat(rules, sshAccess)
+  else rules
+
+fun new {
+      name: String,
+      subnets: List<EC2.Subnet>,
+      keyName: Optional<String>,
+      image: Optional<String>,
+      artifactRepoName: Optional<String>,
+      instanceType: Optional<EC2.InstanceType>,
+      managementSgs: Optional<List<EC2.SecurityGroup>>,
+      tags: Optional<List<AWS.Tag>>
+    } -> Jenkins:
+  let _vpc: List.elementAt(0, subnets).(EC2.Subnet).vpc
+  let _region: _vpc.(EC2.Vpc).region
+  let _keyName:              Optional.unpack(name, keyName)
+  let _image:                Optional.unpack(amiForRegion(_region), image)
+  let _artifactRepoName:     Optional.unpack("myFugueArtifacts", artifactRepoName)
+  let _instanceType:         Optional.unpack(EC2.T2_large, instanceType)
+  let _managementSgs:        Optional.unpack([], managementSgs)
+  let _extraTags:            Optional.unpack([], tags)
+
+  let sgs: makeJenkinsSgs {
+    name: name,
+    vpc: _vpc,
+    extraTags: _extraTags,
+  }
+
+  let policy: IAM.Policy.new {
+    policyName: name ++ "-policy",
+    policyDocument: '{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Action": "*",
+          "Effect": "Allow",
+          "Resource": "*"
+        }
+      ]
+    }',
+  }
+  let role: IAM.Role.new {
+    roleName: name ++ "-role",
+    rolePolicies: [policy],
+    assumeRolePolicyDocument: IAM.Policy.AssumeRole.ec2,
+  }
+  let profile: IAM.InstanceProfile.new {
+    instanceProfileName: name ++ "-profile",
+    roles: [role],
+  }
+
+
+  let elb:  ELB.LoadBalancer.new {
+    loadBalancerName: name ++ "-elb",
+    listeners: [
+      ELB.Listener.new {
+        protocol: ELB.TCP,
+        loadBalancerPort: 80,
+        instancePort: 8080,
+        instanceProtocol: ELB.TCP,
+      },
+      ELB.Listener.new {
+        protocol: ELB.TCP,
+        loadBalancerPort: 443,
+        instancePort: 8080,
+        instanceProtocol: ELB.TCP,
+      }
+    ],
+    healthCheck: ELB.HealthCheck.tcp {
+      port: 8080,
+      interval: 5,
+      timeout: 2,
+      unhealthyThreshold: 2,
+      healthyThreshold: 2,
+    },
+    subnets: subnets,
+    securityGroups: [sgs.elbSg],
+    tags: List.concat([AWS.tag("Name", name)], _extraTags),
+  }
+
+  let lc: AutoScaling.LaunchConfiguration.new {
+    image: _image,
+    securityGroups: List.concat([sgs.asgSg], _managementSgs),
+    keyName: _keyName,
+    instanceType: _instanceType,
+    associatePublicIpAddress: True,
+    iamInstanceProfile: profile,
+    userData: JenkinsConfig.new(_artifactRepoName),
+    blockDeviceMappings: [
+      EC2.InstanceBlockDeviceMapping.new {
+        deviceName: "/dev/sda1",
+        ebs: EC2.EbsInstanceBlockDevice.new {
+          volume: EC2.Volume.new {
+            volumeType: EC2.Standard,
+            size: 10,
+            availabilityZone: AWS.A,
+            tags: List.concat([AWS.tag("Name", name)], _extraTags),
+          },
+          deleteOnTermination: True,
+        },
+      }
+    ],
+  }
+  let asg: AutoScaling.AutoScalingGroup.new {
+    subnets: subnets,
+    loadBalancers: [elb],
+    minSize: 1,
+    maxSize: 2,
+    defaultCooldown: 300,
+    healthCheckType: AutoScaling.Ec2,
+    launchConfiguration: lc,
+    tags: List.concat([AWS.tag("Name", name)], _extraTags),
+    terminationPolicies: [AutoScaling.ClosestToNextInstanceHour],
+    enabledMetrics: [
+      AutoScaling.GroupInServiceInstances,
+      AutoScaling.GroupTotalInstances,
+    ]
+  }
+  Jenkins {
+    elb: elb,
+    asg: asg,
+    sgs: sgs,
+  }

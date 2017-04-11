@@ -1,0 +1,24 @@
+export
+  new
+
+fun new(repo: String) -> String:
+  Template.render {
+    data: {
+      repo: repo,
+    },
+    template: userData,
+    missBehavior: Template.MissAsEmptyString,
+  }
+
+userData:
+  "#! /usr/bin/env bash
+  \apt-get update
+  \apt-get install -y default-jre-headless python-pip python-dev git
+  \pip install awscli credstash==1.12.0
+  \wget -q -O - https://pkg.jenkins.io/debian-stable/jenkins.io.key | sudo apt-key add -
+  \echo 'deb https://pkg.jenkins.io/debian-stable binary/' > /etc/apt/sources.list.d/jenkins.list
+  \apt-get update
+  \apt-get install -y jenkins
+  \aws s3 cp s3://{{repo}}/fugue-client_0.27.12-1807_amd64.deb .
+  \aws s3 cp s3://{{repo}}/fugue-support_0.5.0-306_amd64.deb .
+  \dpkg -i fugue-*"

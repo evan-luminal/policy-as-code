@@ -1,0 +1,13 @@
+export
+  config
+
+import Corp.Environment as Environment
+
+import Config.Environment.Dev as Dev
+import Config.Environment.QA as QA
+import Config.Environment.Prod as Prod
+
+config: case Environment.environment of
+  | Environment.DEV  -> Dev.config 
+  | Environment.QA   -> QA.config
+  | Environment.PROD -> Prod.config

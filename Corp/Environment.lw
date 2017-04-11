@@ -1,0 +1,15 @@
+export
+  type Environment
+  environment
+
+type Environment:
+  | DEV
+  | QA
+  | PROD
+
+environment: 
+  case String.getEnv("ENVIRONMENT") of
+    | Optional "DEV"     -> DEV
+    | Optional "QA"      -> QA
+    | Optional "PROD"    -> PROD
+    | _                  -> error("ENVIRONMENT must be set to DEV, QA, or PROD.")

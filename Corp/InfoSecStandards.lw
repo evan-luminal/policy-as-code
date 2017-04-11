@@ -1,0 +1,178 @@
+export
+  isApprovedEnvironment
+
+import Fugue.AWS as AWS
+import Fugue.AWS.AutoScaling as AutoScaling
+import Fugue.AWS.Cloudformation as Cloudformation
+import Fugue.AWS.EC2 as EC2
+import Fugue.AWS.ELB as ELB
+import Fugue.AWS.Elasticache as Elasticache
+import Fugue.AWS.RDS as RDS
+import Fugue.AWS.S3 as S3
+
+import Corp.Environment as Environment
+
+validate usEastOnly
+validate allowInboundSshInApprovedEnvironmentsOnly
+validate requireStandardTagsOnAutoScalingAutoScaleGroups
+validate requireStandardTagsOnCloudformationStacks
+validate requireStandardTagsOnEC2CustomerGateways
+#validate requireStandardTagsOnEC2DhcpOptions
+validate requireStandardTagsOnEC2Instances
+validate requireStandardTagsOnEC2InternetGateways
+validate requireStandardTagsOnEC2NetworkAcls
+validate requireStandardTagsOnEC2NetworkInterfaces
+validate requireStandardTagsOnEC2PrimaryInstanceNetworkInterfaces
+validate requireStandardTagsOnEC2RouteTables
+validate requireStandardTagsOnEC2SecurityGroups
+validate requireStandardTagsOnEC2Subnets
+validate requireStandardTagsOnEC2Volumes
+validate requireStandardTagsOnEC2VpcPeeringConnections
+validate requireStandardTagsOnEC2Vpcs
+validate requireStandardTagsOnEC2VpnConnections
+validate requireStandardTagsOnEC2VpnGateways
+validate requireStandardTagsOnELBLoadBalancers
+validate requireStandardTagsOnElasticacheCacheClusters
+validate requireStandardTagsOnElasticacheReplicationGroups
+validate requireStandardTagsOnRDSDBInstances
+validate requireStandardTagsOnRDSDBSubnetGroups
+validate requireStandardTagsOnS3Buckets
+
+requiredTags: [
+  "Name",
+]
+
+approvedEnvironments: [
+  Environment.DEV,
+]
+
+fun isApprovedEnvironment() -> Bool:
+  List.any(fun(e): e == Environment.environment, approvedEnvironments) 
+
+fun usEastOnly(region: AWS.Region) -> Validation:
+  case region of
+    | AWS.Us-east-1 -> Validation.success
+    | _             -> Validation.failure("Invalid Region: Everything must run in us-east-1")
+
+fun allowInboundSshInApprovedEnvironmentsOnly(sg: EC2.SecurityGroup) -> Validation:
+  let errorMsg: "Inbound SSH access (port 22) is not allowed outside of the DEV environment."
+  if isApprovedEnvironment() then
+    Validation.success
+  else
+    case sg.(EC2.SecurityGroup).ipPermissions of
+      | None           -> Validation.success
+      | Optional rules -> if List.any(allowsSsh, rules) then Validation.failure(errorMsg)
+                          else Validation.success
+
+# Returns True if the given IpPermission allows SSH (port 22) access.
+fun allowsSsh(rule: EC2.IpPermission) -> Bool:
+  case rule.(EC2.IpPermission).ipProtocol of
+    | "-1"  -> True
+    | "udp" -> False
+    | "tcp" -> let fromPort: rule.(EC2.IpPermission).fromPort
+               let toPort: rule.(EC2.IpPermission).toPort
+               (fromPort <= 22) && (toPort >= 22)
+    | _     -> False
+
+fun includesRequiredTags(tags: List<AWS.Tag>) -> Bool:
+  let fun includesTag(key: String) -> Bool:
+    List.any(fun(t): AWS.Tag.key(t) == key && String.length(AWS.Tag.value(t)) > 0, tags)
+  List.all(includesTag, requiredTags)
+
+fun requireStandardTags(tags: List<AWS.Tag>) -> Validation:
+  if includesRequiredTags(tags) then Validation.success
+  else
+    let requiredList: String.join("\n", ["    - " ++ t for t in requiredTags])
+    Validation.failure("All taggable resources must have the following tags:\n" ++ requiredList ++ "\n")
+
+fun requireStandardTagsOnAutoScalingAutoScaleGroups(autoScalingGroup: AutoScaling.AutoScalingGroup) -> Validation:
+  let tags: Optional.unpack([], autoScalingGroup.(AutoScaling.AutoScalingGroup).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnCloudformationStacks(stack: Cloudformation.Stack) -> Validation:
+  let tags: Optional.unpack([], stack.(Cloudformation.Stack).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2CustomerGateways(customerGateway: EC2.CustomerGateway) -> Validation:
+  let tags: Optional.unpack([], customerGateway.(EC2.CustomerGateway).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2DhcpOptions(dhcpOptions: EC2.DhcpOptions) -> Validation:
+  let tags: Optional.unpack([], dhcpOptions.(EC2.DhcpOptions).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2Instances(instance: EC2.Instance) -> Validation:
+  let tags: Optional.unpack([], instance.(EC2.Instance).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2InternetGateways(internetGateway: EC2.InternetGateway) -> Validation:
+  let tags: Optional.unpack([], internetGateway.(EC2.InternetGateway).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2NetworkAcls(networkAcl: EC2.NetworkAcl) -> Validation:
+  let tags: Optional.unpack([], networkAcl.(EC2.NetworkAcl).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2NetworkInterfaces(networkInterface: EC2.NetworkInterface) -> Validation:
+  let tags: Optional.unpack([], networkInterface.(EC2.NetworkInterface).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2PrimaryInstanceNetworkInterfaces(primaryInstanceNetworkInterface: EC2.PrimaryInstanceNetworkInterface) -> Validation:
+  let tags: Optional.unpack([], primaryInstanceNetworkInterface.(EC2.PrimaryInstanceNetworkInterface).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2RouteTables(routeTable: EC2.RouteTable) -> Validation:
+  let tags: Optional.unpack([], routeTable.(EC2.RouteTable).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2SecurityGroups(securityGroup: EC2.SecurityGroup) -> Validation:
+  let tags: Optional.unpack([], securityGroup.(EC2.SecurityGroup).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2Subnets(subnet: EC2.Subnet) -> Validation:
+  let tags: Optional.unpack([], subnet.(EC2.Subnet).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2Volumes(volume: EC2.Volume) -> Validation:
+  let tags: Optional.unpack([], volume.(EC2.Volume).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2Vpcs(vpc: EC2.Vpc) -> Validation:
+  let tags: Optional.unpack([], vpc.(EC2.Vpc).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2VpnConnections(vpnConnection: EC2.VpnConnection) -> Validation:
+  let tags: Optional.unpack([], vpnConnection.(EC2.VpnConnection).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2VpcPeeringConnections(vpcPeeringConnection: EC2.VpcPeeringConnection) -> Validation:
+  let tags: Optional.unpack([], vpcPeeringConnection.(EC2.VpcPeeringConnection).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnEC2VpnGateways(vpnGateway: EC2.VpnGateway) -> Validation:
+  let tags: Optional.unpack([], vpnGateway.(EC2.VpnGateway).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnELBLoadBalancers(loadbalancer: ELB.LoadBalancer) -> Validation:
+  let tags: Optional.unpack([], loadbalancer.(ELB.LoadBalancer).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnElasticacheCacheClusters(cacheCluster: Elasticache.CacheCluster) -> Validation:
+  let tags: Optional.unpack([], cacheCluster.(Elasticache.CacheCluster).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnElasticacheReplicationGroups(replicationGroup: Elasticache.ReplicationGroup) -> Validation:
+  let tags: Optional.unpack([], replicationGroup.(Elasticache.ReplicationGroup).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnRDSDBInstances(dbInstance: RDS.DBInstance) -> Validation:
+  let tags: Optional.unpack([], dbInstance.(RDS.DBInstance).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnRDSDBSubnetGroups(dbSubnetGroup: RDS.DBSubnetGroup) -> Validation:
+  let tags: Optional.unpack([], dbSubnetGroup.(RDS.DBSubnetGroup).tags)
+  requireStandardTags(tags)
+
+fun requireStandardTagsOnS3Buckets(bucket: S3.Bucket) -> Validation:
+  let tags: Optional.unpack([], bucket.(S3.Bucket).tags)
+  requireStandardTags(tags)
